@@ -1,0 +1,54 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 3 * * 3'  # Every Wednesday at 3 AM UTC
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/qwerttvv/Beijing-IPTV.git 2>/dev/null || true
+          git fetch upstream
+
+      - name: Sync with upstream
+        run: |
+          git merge upstream/master --no-edit -m "Sync from upstream" || \
+          git merge upstream/main --no-edit -m "Sync from upstream" || \
+          echo "No upstream changes"
+
+      - name: Apply custom patches (Replace IP addresses)
+        run: |
+          for file in *.m3u; do
+            if [ -f "$file" ]; then
+              sed -i 's/192\.168\.123\.1:23234/192.168.1.1:4022/g' "$file"
+              echo "Updated: $file"
+            fi
+          done
+
+      - name: Push changes
+        run: |
+          if [[ -n $(git status -s) ]]; then
+            git add .
+            git commit -m "auto sync: replaced 192.168.123.1:23234 with 192.168.1.1:4022"
+            git push origin master
+            echo "✅ Sync completed with custom patches"
+          else
+            echo "ℹ️ No changes detected"
+          fi
