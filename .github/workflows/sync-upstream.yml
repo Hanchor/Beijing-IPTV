@@ -33,41 +33,35 @@ jobs:
           git remote add upstream https://github.com/qwerttvv/Beijing-IPTV.git
           git fetch --no-tags upstream master
 
-      - name: Update playlists and replace address
+      - name: Merge upstream history and synchronize files
         shell: bash
         run: |
           set -euo pipefail
 
           upstream_ref=refs/remotes/upstream/master
-          playlists=()
 
-          while IFS= read -r -d '' file; do
-            if [[ "$file" != */* && "$file" == *.m3u ]]; then
-              playlists+=("$file")
-            fi
-          done < <(git ls-tree -r --name-only -z "$upstream_ref")
+          # Prepare a merge that records upstream history.
+          # The final file contents are set explicitly below.
+          git merge --no-ff --no-commit -s ours "$upstream_ref"
 
-          if (( ${#playlists[@]} == 0 )); then
-            echo "::error::No root-level .m3u files found upstream."
-            exit 1
-          fi
+          # Use the complete upstream tree, including file deletions.
+          git read-tree --reset -u "$upstream_ref"
 
-          # Remove existing root-level playlists, including obsolete ones.
-          git rm -f --ignore-unmatch -- ':(top,glob)*.m3u'
-
-          # Copy the latest playlists directly from upstream.
+          # Preserve this repository's GitHub Actions workflows.
           git restore \
-            --source="$upstream_ref" \
+            --source=HEAD \
             --staged \
             --worktree \
-            -- "${playlists[@]}"
+            -- .github/workflows
 
-          # Apply the local server address.
-          for file in "${playlists[@]}"; do
-            sed -i \
-              's/192\.168\.123\.1:23234/192.168.1.1:4022/g' \
-              "$file"
-            git add -- "$file"
+          # Replace the server address in root-level playlists.
+          for file in *.m3u; do
+            if [ -f "$file" ]; then
+              sed -i \
+                's/192\.168\.123\.1:23234/192.168.1.1:4022/g' \
+                "$file"
+              git add -- "$file"
+            fi
           done
 
       - name: Commit and push
@@ -75,10 +69,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          if git diff --cached --quiet; then
-            echo "Playlists are already up to date."
-            exit 0
+          # Commit even when files are unchanged if a merge is pending.
+          if git rev-parse --verify -q MERGE_HEAD >/dev/null; then
+            git commit -m "Sync upstream and replace IPTV server address"
+          elif ! git diff --cached --quiet; then
+            git commit -m "Update upstream files and replace IPTV server address"
+          else
+            echo "Already up to date."
           fi
 
-          git commit -m "auto sync: update IPTV playlists and replace server address"
+          # Verify that the fetched upstream history is included.
+          git merge-base --is-ancestor upstream/master HEAD
+
           git push origin HEAD:master
