@@ -2,19 +2,25 @@ name: Sync Upstream
 
 on:
   schedule:
-    - cron: '0 3 * * 3'  # Every Wednesday at 3 AM UTC
+    - cron: '0 3 * * 3'
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream-master
+  cancel-in-progress: false
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout master
         uses: actions/checkout@v4
         with:
+          ref: master
           fetch-depth: 0
 
       - name: Configure Git
@@ -22,18 +28,31 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Add upstream remote
+      - name: Fetch upstream
         run: |
-          git remote add upstream https://github.com/qwerttvv/Beijing-IPTV.git 2>/dev/null || true
+          git remote add upstream https://github.com/qwerttvv/Beijing-IPTV.git
           git fetch upstream
 
       - name: Sync with upstream
+        shell: bash
         run: |
-          git merge upstream/master --no-edit -m "Sync from upstream" || \
-          git merge upstream/main --no-edit -m "Sync from upstream" || \
-          echo "No upstream changes"
+          if git show-ref --verify --quiet refs/remotes/upstream/master; then
+            upstream_branch=upstream/master
+          elif git show-ref --verify --quiet refs/remotes/upstream/main; then
+            upstream_branch=upstream/main
+          else
+            echo "::error::Upstream has neither master nor main."
+            exit 1
+          fi
+
+          if ! git merge "$upstream_branch" --no-edit -m "Sync from upstream"; then
+            git merge --abort || true
+            echo "::error::Upstream merge failed. Resolve the merge manually."
+            exit 1
+          fi
 
       - name: Replace IP addresses
+        shell: bash
         run: |
           for file in *.m3u; do
             if [ -f "$file" ]; then
@@ -42,9 +61,12 @@ jobs:
           done
 
       - name: Commit and push
+        shell: bash
         run: |
-          if [[ -n $(git status -s) ]]; then
-            git add .
-            git commit -m "auto sync: replaced 192.168.123.1:23234 with 192.168.1.1:4022"
-            git push origin master
+          git add -- '*.m3u'
+
+          if ! git diff --cached --quiet; then
+            git commit -m "auto sync: replace IPTV server address"
           fi
+
+          git push origin HEAD:master
