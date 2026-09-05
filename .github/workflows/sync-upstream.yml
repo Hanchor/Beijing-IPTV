@@ -57,14 +57,13 @@ jobs:
           for file in *.m3u; do
             if [ -f "$file" ]; then
               sed -i 's/192\.168\.123\.1:23234/192.168.1.1:4022/g' "$file"
+              git add -- "$file"
             fi
           done
 
       - name: Commit and push
         shell: bash
         run: |
-          git add -- '*.m3u'
-
           if ! git diff --cached --quiet; then
             git commit -m "auto sync: replace IPTV server address"
           fi
